@@ -1,0 +1,76 @@
+name: capstone-project x-common-vars: &common-vars
+  tty: true
+  stdin_open: true
+  ipc: host
+  network_mode: host
+  stop_grace_period: 1s
+  environment:
+    RMW_IMPLEMENTATION: rmw_cyclonedds_cpp # rmw_cyclonedds_cpp | rmw_fastrtps_cpp
+    ROS_DOMAIN_ID: 40
+
+services:
+  camera:
+    image: capstone:camera
+    container_name: camera
+    build:
+      context: .
+      target: realsense
+      args:
+        USER: camera
+        LIBREALSENSE_VERSION: $LIBREALSENSE_VERSION
+        REALSENSE_ROS_VERSION: $REALSENSE_ROS_VERSION
+    <<: *common-vars
+    privileged: true
+    volumes:
+        - /dev:/dev
+        - $LOCAL_WORKSPACE_FOLDER/camera-pkg:/home/camera/capstone-ws/src/realsense-ros
+    device_cgroup_rules:
+        - "c 81:* rmw"
+        - "c 189:* rmw"
+    command: >
+      bash -ic "
+      colcon build --packages-select realsense2_camera;
+      source /home/realsense/vision-ws/install/local_setup.bash;
+      ros2 launch realsense2_camera rs_launch.py
+      "
+    profiles: ['camera']
+  yolov12:
+    image: capstone:yolov12
+    container_name: yolo
+    build:
+      context: .
+      target: yolo
+      args:
+        USER: yolo
+    <<: *common-vars
+    volumes:
+        - $LOCAL_WORKSPACE_FOLDER/yolo-pkg:/home/yolo/capstone-ws/src/yolo_ros
+    shm_size: 6gb
+    privileged: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: bash
+    profiles: ['yolo']
+  
+  gui:
+    image: capstone:gui
+    container_name: gui
+    build:
+      context: .
+      target: gui
+      args:
+        USER: gui
+    <<: *common-vars
+    volumes:
+        # X11 socket
+        - /tmp/.X11-unix:/tmp/.X11-unix
+        - $HOME/.Xauthority:/home/gui/.Xauthority
+        # Wayland socket
+        # - $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY:/tmp/$WAYLAND_DISPLAY
+    command: ros2 launch foxglove_bridge foxglove_bridge_launch.xml address:=localhost port:=8765
+    profiles: ['gui']
